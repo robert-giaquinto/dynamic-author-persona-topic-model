@@ -1,0 +1,9 @@
+*.pyc
+*.dat
+.idea/*
+*~
+venv/*
+apt_python.egg-info/
+scripts/log/*
+*.log
+*.e*

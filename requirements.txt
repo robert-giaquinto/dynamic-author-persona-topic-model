@@ -1,0 +1,11 @@
+backports.shutil-which==3.5.1
+certifi==2017.4.17
+chardet==3.0.4
+colorama==0.3.9
+idna==2.5
+numpy==1.13.0
+pytz==2017.2
+requests==2.18.1
+scipy==0.19.0
+six==1.10.0
+urllib3==1.21.1
