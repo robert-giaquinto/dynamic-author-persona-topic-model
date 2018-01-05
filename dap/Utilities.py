@@ -13,6 +13,17 @@ def digamma(x):
     return p
 
 
+def dirichlet_expectation(dirichlet_parameter):
+    """
+    compute dirichlet expectation
+    :param dirichlet_parameter:
+    :return:
+    """
+    if len(dirichlet_parameter.shape) == 1:
+        return psi(dirichlet_parameter) - psi(np.sum(dirichlet_parameter))
+    return psi(dirichlet_parameter) - psi(np.sum(dirichlet_parameter, 1))[:, np.newaxis]
+
+
 def log_sum(log_a, log_b):
     if log_a == -1:
         return log_b
@@ -62,10 +73,20 @@ def unpickle_it(filepath):
     return obj
 
 
+
 def matrix2str(mat, num_digits=2):
+    """
+    take a matrix (either list of lists of numpy array) and put it in a
+    pretty printable format.
+    :param mat: matrix to print
+    :param num_digits: how many significant digits to show
+    :return:
+    """
     rval = ''
     for row in mat:
-        s = '{: .' + str(num_digits) + '}'
-        rval += '\t'.join([s.format(round(elt, num_digits)) for elt in row]) + '\n'
-
+        s = '{:.' + str(num_digits) + '}'
+        # rval += '\t'.join([s.format(round(elt, num_digits)) for elt in row]) + '\n'
+        fpad = ['' if round(elt, num_digits) < 0 else ' ' for elt in row]
+        bpad = [' ' * (1 + 7 - len(str(np.abs(round(elt, num_digits))))) for elt in row]
+        rval += ''.join([f + s.format(round(elt, num_digits)) + b for elt, f, b in zip(row, fpad, bpad)]) + '\n'
     return rval

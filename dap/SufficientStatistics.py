@@ -59,11 +59,7 @@ class SufficientStatistics(object):
         except Warning:
             self.x2[t, :] += np.where(vp.tau < 1e-4, 1e-4, vp.tau**2)
 
-        phi = np.exp(vp.log_phi)
-        for n in range(doc.num_terms):
-            w = doc.words[n]
-            c = doc.counts[n]
-            self.beta[:, w] += c * phi[:, n]
+        self.beta[:, doc.words] += np.exp(vp.log_phi + np.log(doc.counts))
 
         for p in range(self.num_personas):
             self.alpha[t, :, p] += vp.gamma * vp.tau[p]
@@ -86,13 +82,14 @@ class SufficientStatistics(object):
         :param stats:
         :return:
         """
-        self.x += other.x
-        self.x2 += other.x2
-        self.beta += other.beta
-        self.alpha += other.alpha
-        self.sigma += other.sigma
-        self.kappa += other.kappa
-        self.num_obs += other.num_obs
+        if other is not None:
+            self.x += other.x
+            self.x2 += other.x2
+            self.beta += other.beta
+            self.alpha += other.alpha
+            self.sigma += other.sigma
+            self.kappa += other.kappa
+            self.num_obs += other.num_obs
 
     def __str__(self):
         rval = "SufficientStatistics derived from num_obs = {}".format(self.num_obs)

@@ -21,6 +21,7 @@ class Corpus(object):
 
         self.docs = []
         self.num_docs = 0
+        self.total_words = 0
         self.times = []
         self.num_times = 0
         self.vocab_size = 0
@@ -45,6 +46,7 @@ class Corpus(object):
         logger.info("Number of time points: " + str(self.num_times))
         logger.info("Number of authors: " + str(self.num_authors))
         logger.info("Number of documents: " + str(self.num_docs))
+        logger.info("Total number of words: " + str(self.total_words))
         logger.info("Found ids for " + str(self.vocab_size) + " terms in vocabulary")
         logger.info("Number of documents skipped (no words): " + str(skipped_docs))
         logger.info("Number of times skipped (no documents): " + str(skipped_times))
@@ -114,6 +116,7 @@ class Corpus(object):
                     doc.words = np.array([w for w, c in word_counts])
                     doc.counts = np.array([c for w, c in word_counts])
                     self.docs.append(doc)
+                    self.total_words += np.sum(doc.counts)
 
                     if max(doc.words) > self.vocab_size:
                         self.vocab_size = max(doc.words) + 1
@@ -173,6 +176,8 @@ class Corpus(object):
 
                     self.num_docs_per_time[t] += 1
                     words = np.array([w for w, c in word_counts])
+                    counts = np.array([c for w, c in word_counts])
+                    self.total_words += np.sum(counts)
 
                     if max(words) > self.vocab_size:
                         self.vocab_size = max(words) + 1
@@ -230,7 +235,7 @@ class Corpus(object):
                         yield doc
 
     def __len__(self):
-        return len(self.doc_sets)
+        return len(self.docs)
 
     def __str__(self):
         return "Corpus with " + str(self.num_times) + " time periods, and " + str(self.num_docs) + " total documents."

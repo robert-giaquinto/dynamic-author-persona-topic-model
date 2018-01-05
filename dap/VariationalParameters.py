@@ -3,8 +3,7 @@ import logging
 import numpy as np
 from math import log, exp, isnan
 from scipy.optimize import minimize
-from scipy.misc import logsumexp
-from scipy.special import psi
+from scipy.special import psi, logsumexp
 import warnings
 
 from dap.Utilities import safe_log_array
@@ -31,12 +30,11 @@ class VariationalParameters(object):
 
         # values to be precomputed before calculating gamma
         self.alpha = None
-        self.delta = None
+        self.E_log_kappa = None
         self.sigma = None
         self.sigma_inv = None
         self.log_beta = None
         self.sum_phi = None
-        self.alpha_tau = None
         self.total_words = 0
 
         # parameters will be initialized when rest it called
@@ -52,12 +50,11 @@ class VariationalParameters(object):
         :return:
         """
         self.alpha = None
-        self.delta = None
+        self.E_log_kappa = None
         self.sigma = None
         self.sigma_inv = None
         self.log_beta = None
         self.sum_phi = None
-        self.alpha_tau = None
         self.total_words = 0
 
         self.tau = np.ones(self.num_personas) * (1.0 / self.num_personas)
@@ -66,20 +63,20 @@ class VariationalParameters(object):
         self.log_phi = np.log(np.ones((self.num_topics, doc.num_terms)) * (1.0 / self.num_topics))
         self.zeta = 10.0
 
-    def update(self, doc, alpha, delta, sigma, sigma_inv, log_beta):
+    def update(self, doc, alpha, E_log_kappa, sigma, sigma_inv, log_beta):
         """
         update the ss given some document and variational parameters
 
         :param doc:
         :param alpha:
-        :param delta:
+        :param E_log_kappa:
         :param sigma:
         :param sigma_inv:
         :param log_beta:
         :return:
         """
         self.alpha = alpha
-        self.delta = delta
+        self.E_log_kappa = E_log_kappa
         self.sigma = sigma
         self.sigma_inv = sigma_inv
         self.log_beta = log_beta
@@ -105,26 +102,11 @@ class VariationalParameters(object):
         """
         self.sum_phi = np.sum(np.exp(self.log_phi) * doc.counts[np.newaxis, :], axis=1)
 
-        cg = True
-        if cg:
-            # pass gamma as inital values
-            x0 = np.copy(self.gamma)
-            res = minimize(fun=self._gamma_f, x0=x0, method='CG', jac=self._gamma_df,
-                           tol=self.cg_convergence, options={'disp': False, 'maxiter': self.cg_max_iter})
-            self.gamma = res.x
-        else:
-            # optimize using gradient descent
-            lr = 0.01
-            it = 0
-            dif = np.sum(self.gamma)
-            objective = 0.0
-            while it < 15 and dif > 1e-5:
-                prev_objective = objective
-                objective = self._gamma_f()
-                gradient = self._gamma_df()
-                self.gamma += lr * gradient
-                dif = np.sum(np.abs(objective - prev_objective))
-                it += 1
+        # pass gamma as inital values
+        x0 = np.copy(self.gamma)
+        res = minimize(fun=self._gamma_f, x0=x0, method='CG', jac=self._gamma_df,
+                       tol=self.cg_convergence, options={'disp': False, 'maxiter': self.cg_max_iter})
+        self.gamma = res.x
 
     def _gamma_f(self, gamma):
         # term1: -0.5 * sum_D((gamma - alpha_tau) sigma_inv (gamma - alpha_tau))
@@ -241,7 +223,7 @@ class VariationalParameters(object):
         helper function called by tau's e step in EG algorithm
         :return:
         """
-        term1 = psi(self.delta) - psi(self.delta.sum())
+        # term1 = self.E_log_kappa
 
         term2 = self.alpha.T.dot(self.sigma_inv).dot(self.gamma - self.alpha.dot(self.tau))
         for p in range(self.num_personas):
@@ -251,7 +233,7 @@ class VariationalParameters(object):
         # term3 = np.zeros(self.num_personas)
         term3 = -1.0 * (safe_log_array(self.tau) + 1.0)
 
-        rval = term1 + term2 + term3
+        rval = self.E_log_kappa + term2 + term3
         return rval
 
 
