@@ -168,7 +168,7 @@ class Dap(object):
         self.vocab = np.array(corpus.vocab)
         self.id2author = {y: x for x, y in corpus.author2id.iteritems()}
 
-    def fit(self, corpus, out_dir, model_file=None, init_beta_from="random", num_docs_init=100, resume=False):
+    def fit(self, corpus, out_dir, model_file=None, init_beta_from="random", num_docs_init=100, resume=False, max_training_minutes=None):
         """
         Main method for training DAP model
         :param corpus:
@@ -195,12 +195,12 @@ class Dap(object):
             else:
                 self.init_beta_from_corpus(corpus, num_docs_init)
 
-            lhood_file = os.path.join(out_dir, model_file[0:-2] + '_likelihood.dat')
+            lhood_file = os.path.join(out_dir, model_file[0:-2] + '_likelihood.txt')
 
             self._it = 0
         else:
             logger.info("RESUMING TRAINING\n" + "-" * 80 + "\n")
-            lhood_file = os.path.join(out_dir, model_file[0:-2] + '_likelihood_resumed.dat')
+            lhood_file = os.path.join(out_dir, model_file[0:-2] + '_likelihood_resumed.txt')
 
         # convergence stats
         model_lhood, model_lhood_old = 1.0, 1.0
@@ -243,8 +243,7 @@ class Dap(object):
                     self.var_max_iter = self.var_max_iter_init
 
             log_str = """EM Iteration {}
-                model log-likelihood: {:.1f}, model per-word log-likelihood {:.2f},
-                words per-word log-likelihood {:.2f},
+                model log-likelihood: {:.1f}, model per-word log-likelihood {:.2f}, words per-word log-likelihood {:.2f},
                 Pct improvement: {:.1f}%, Avg number of iterations: {:.1f}, Pct Converged: {:.1f}
                 alpha: {:.1f}, beta: {:.1f}, kappa: {:.1f}, penalty: {:.1f}
                 docs: {}, minutes: {:.1f} => {:.1f} docs/hr
@@ -266,12 +265,15 @@ class Dap(object):
 
             model_lhood_old = model_lhood
             self._it += 1
+            elapsed_time += em_time
+            if max_training_minutes is not None and (elapsed_time / 60.0) > max_training_minutes:
+                logger.info("Maxed training time has elapsed, stopping training.")
+                break
 
         total_time = time.time() - total_time
         self.trained = True
         log_str = """Stopped after {} iterations.
-            Final model log-likelihood: {:.1f}, model per-word log-likelihood {:.2f},
-            Final words per-word log-likelihood {:.2f},
+            Final model log-likelihood: {:.1f}, model per-word log-likelihood {:.2f}, words per-word log-likelihood {:.2f},
             Total time: {:.2f} (minutes), Avg docs/hour: {:.2f}
             """
         logger.info(log_str.format(self._it, model_lhood, model_pwll, words_pwll,
@@ -285,9 +287,9 @@ class Dap(object):
         Computes the average heldout log-likelihood
         """
         if self.num_workers > 1:
-            _, test_words_lhood, _, _ = self.expectation_parallel(docs=test_corpus, save_ss=False)
+            _, test_words_lhood, _, _ = self.expectation_parallel(test_corpus, save_ss=False)
         else:
-            _, test_words_lhood, _, _ = self.expectation(docs=test_corpus, save_ss=False)
+            _, test_words_lhood, _, _ = self.expectation(test_corpus, save_ss=False)
 
         test_words_pwll = test_words_lhood / test_corpus.total_words
         logger.info('Test words log-lhood: {:.1f}, words per-word log-lhood: {:.2f}'.format(
@@ -308,7 +310,7 @@ class Dap(object):
         if os.path.isdir(out_dir) is False:
             os.mkdir(out_dir)
 
-        logger.info("FIT and PREDICT\n" + "-" * 80 + "\n")
+        logger.info("FIT and PREDICT (evaluating every {} iterations)\n".format(evaluate_every) + "-" * 80 + "\n")
         # do initializations for model
         self._check_params()
         self.corpus_init(train_corpus)
@@ -322,7 +324,7 @@ class Dap(object):
         else:
             self.init_beta_from_corpus(train_corpus, num_docs_init)
 
-        lhood_file = os.path.join(out_dir, model_file[0:-2] + '_likelihood.dat')
+        lhood_file = os.path.join(out_dir, model_file[0:-2] + '_likelihood.txt')
 
         self._it = 0
         train_results = []
@@ -332,6 +334,7 @@ class Dap(object):
         model_lhood, model_lhood_old = 1.0, 1.0
         convergence = 1.0
         converged = False
+        elapsed_time = 0.0
 
         # begin EM iterations
         total_time = time.time()
@@ -368,8 +371,7 @@ class Dap(object):
                     self.var_max_iter = self.var_max_iter_init
 
             log_str = """EM Iteration {}
-                model log-likelihood: {:.1f}, model per-word log-likelihood {:.2f},
-                words per-word log-likelihood {:.2f},
+                model log-likelihood: {:.1f}, model per-word log-likelihood {:.2f}, words per-word log-likelihood {:.2f},
                 Pct improvement: {:.1f}%, Avg number of iterations: {:.1f}, Pct Converged: {:.1f}
                 alpha: {:.1f}, beta: {:.1f}, kappa: {:.1f}, penalty: {:.1f}
                 docs: {}, minutes: {:.1f} => {:.1f} docs/hr
@@ -396,6 +398,10 @@ class Dap(object):
 
             model_lhood_old = model_lhood
             self._it += 1
+            elapsed_time += em_time
+            if max_training_minutes is not None and (elapsed_time / 60.0) > max_training_minutes:
+                logger.info("Maxed training time has elapsed, stopping training.")
+                break
 
         total_time = time.time() - total_time
         self.trained = True
@@ -460,6 +466,8 @@ class Dap(object):
 
         for doc in corpus:
             t = doc.time_id
+            if save_ss == False and doc.doc_id > 100:
+                break
             mll, wll, num_iter, converged, _ = self.doc_e_step(doc, save_ss=save_ss)
             model_lhood += mll
             words_lhood += wll
@@ -576,7 +584,7 @@ class Dap(object):
             # check for convergence
             convergence = abs((lhood_old - lhood) / lhood_old)
 
-        if SHOW_EVERY > 0 and doc.doc_id % SHOW_EVERY == 0 and self.trained is False:
+        if save_ss and SHOW_EVERY > 0 and doc.doc_id % SHOW_EVERY == 0 and self.trained is False:
             logger.info("Values of variational parameters for document: {}".format(doc.doc_id))
             logger.info("Per-word model likelihood for doc[{}] after {} iters: ({}) / {} = {:.2f}".format(
                 doc.doc_id, num_iter, ' + '.join([str(round(x, 2)) for x in model_lhoods]),
@@ -809,15 +817,15 @@ class Dap(object):
                 for t in range(self.num_times):
                     if np.any(np.abs(backwards_alpha[t, :, p]) > 50.0):
                         backwards_alpha[t, :, p] /= (np.max(np.abs(backwards_alpha[t, :, p])) / 50.0)
-
+                # recompute softmax
                 self.alpha[:, :, p] = softmax(backwards_alpha[:, :, p], axis=1)
 
-            logger.info('alpha[p=' + str(p) + ']\n' + matrix2str(self.alpha[:, :, p], 3))
+        # show current state of alpha
+        self.print_topics_over_time(top_n_topics=10)
 
         # update priors mu0
         for k in range(self.num_topics):
             self.mu0[k] = np.sum(self.alpha[0, k, :]) * (1.0 / self.num_personas)
-        # logger.info('mu\n' + ' '.join([str(round(elt, 2)) for elt in self.mu0]) + '\n')
 
         # persona maximization
         self._delta = self.omega + self.ss.kappa
@@ -826,7 +834,6 @@ class Dap(object):
 
         # update omega
         self.omega = self._delta.sum(axis=0) / self.num_authors
-        # logger.info('omega\n' + ' '.join([str(round(elt, 2)) for elt in self.omega]) + "\n")
 
         # topic maximization
         self._lambda = self.eta + self.ss.beta
@@ -834,7 +841,6 @@ class Dap(object):
         beta = np.where(self.ss.beta <= 0, 1e-30, self._lambda)
         beta /= np.sum(beta, axis=1, keepdims=True)
         self.log_beta = np.log(beta)
-        # print updated topics
         self.print_topics(topn=8)
 
         # reset sufficient statistics for next iteration
@@ -936,6 +942,18 @@ class Dap(object):
             if author_id > 10:
                 logger.info("...\n")
                 break
+
+    def print_topics_over_time(self, top_n_topics=None):
+        for p in range(self.num_personas):
+            if top_n_topics is not None:
+                topic_totals = np.sum(self.alpha[:, :, p], axis=0)
+                top_topic_ids = np.argsort(topic_totals)[-top_n_topics:]
+                top_topic_ids.sort()
+                alpha = self.alpha[:, top_topic_ids, p]
+                logger.info('alpha[p={}] top topic ids: ' + '\t'.join([str(i) for i in top_topic_ids]))
+                logger.info('alpha[p={}]\n'.format(p) + matrix2str(alpha, 3))
+            else:
+                logger.info('alpha[p={}]\n'.format(p) + matrix2str(self.alpha[:, :, p], 3))
 
     def save_persona_topics(self, filename):
         with open(filename, "wb") as f:
