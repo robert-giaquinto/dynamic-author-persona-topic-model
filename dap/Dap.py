@@ -296,7 +296,7 @@ class Dap(object):
             test_words_lhood, test_words_pwll))
         return test_words_lhood, test_words_pwll
 
-    def fit_predict(self, train_corpus, test_corpus, out_dir, model_file=None, init_beta_from="random", num_docs_init=100, evaluate_every=None):
+    def fit_predict(self, train_corpus, test_corpus, out_dir, model_file=None, init_beta_from="random", num_docs_init=100, evaluate_every=None, max_training_minutes=None):
         """
         Main method for training DAP model
         :param corpus:
@@ -466,16 +466,18 @@ class Dap(object):
 
         for doc in corpus:
             t = doc.time_id
-            if save_ss == False and doc.doc_id > 100:
-                break
             mll, wll, num_iter, converged, _ = self.doc_e_step(doc, save_ss=save_ss)
             model_lhood += mll
             words_lhood += wll
             avg_num_iter += num_iter
             converged_pct += converged
 
-        avg_num_iter = avg_num_iter / self.ss.num_obs
-        converged_pct = converged_pct / self.ss.num_obs
+        if save_ss:
+            avg_num_iter = avg_num_iter / self.ss.num_obs
+            converged_pct = converged_pct / self.ss.num_obs
+        else:
+            avg_num_iter = 0.0
+            converged_pct = 0.0
         return model_lhood, words_lhood, avg_num_iter, converged_pct
 
     def expectation_parallel(self, corpus, save_ss):
@@ -537,8 +539,12 @@ class Dap(object):
         pool.terminate()
 
         # final clean up and collecting of results
-        avg_num_iter = avg_num_iter[0] / self.ss.num_obs
-        converged_pct = converged_pct[0] / self.ss.num_obs
+        if save_ss:
+            avg_num_iter = avg_num_iter[0] / self.ss.num_obs
+            converged_pct = converged_pct[0] / self.ss.num_obs
+        else:
+            avg_num_iter = 0.0
+            converged_pct = 0.0
         return model_lhood[0], words_lhood[0], avg_num_iter, converged_pct
 
     def doc_e_step(self, doc, save_ss):
@@ -1140,11 +1146,6 @@ def main():
                         help="If method=training, how should beta be initialized? Randomly or from the corpus?")
     parser.add_argument('--model_file', type=str,
                         help='Path to a saved model if doing inference, otherwise name of file to save final model in.')
-    parser.add_argument('--doc_topic_file', type=str,
-                        help='Name of file to save document topic distributions (if running inference).')
-    parser.add_argument('--lhood_file', type=str,
-                        help='Name of file to save per-word likelihoods (if running inference).')
-    parser.add_argument('--doc_lhood_file', type=str, help='Name of file to save each documents perword likelihood')
     parser.add_argument('--em_max_iter', type=int, default=10)
     parser.add_argument('--em_min_iter', type=int, default=5)
     parser.add_argument('--var_max_iter', type=int, default=20)
@@ -1158,6 +1159,8 @@ def main():
     parser.add_argument('--num_personas', type=int, default=4)
     parser.add_argument('--evaluate_every', type=int, default=1,
         help="Evaluate the performance on the test set every evaluate_every EM iterations.")
+    parser.add_argument('--max_training_minutes', type=float,
+        help="Stop the model after this many minutes.")
     parser.add_argument('--penalty', type=float, default=0.2)
     parser.add_argument('--num_workers', type=int, default=1)
     parser.add_argument('--lag', type=int, default=None)
@@ -1218,14 +1221,16 @@ def main():
         # train the model
         if args.test_file is None:
             logger.info("Fitting model to {}.".format(args.train_file))
-            dap.fit(corpus=corpus, out_dir=args.out_dir, model_file=args.model_file, init_beta_from=args.init)
+            dap.fit(corpus=corpus, out_dir=args.out_dir, model_file=args.model_file,
+                init_beta_from=args.init, max_training_minutes=args.max_training_minutes)
         else:
             logger.info("Fitting model to {} and evaluating on {} every {} EM iterations.".format(
                 args.train_file, args.test_file, args.evaluate_every))
             test_corpus = Corpus(args.test_file, vocab_file=args.vocab_file, in_memory=args.corpus_in_memory)
             dap.fit_predict(train_corpus=corpus, test_corpus=test_corpus,
                 out_dir=args.out_dir, model_file=args.model_file,
-                init_beta_from=args.init, evaluate_every=args.evaluate_every)
+                init_beta_from=args.init, evaluate_every=args.evaluate_every,
+                max_training_minutes=args.max_training_minutes)
 
         # save model artifacts
         dap.save_author_personas(os.path.join(args.out_dir, args.model_file[0:-2] + "_author_personas.txt"))
