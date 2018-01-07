@@ -15,7 +15,7 @@ class Corpus(object):
     For now, just store entire corpus in memory
     TODO: provide iterators over corpus, do one pass over file to collect meta information
     """
-    def __init__(self, input_file, vocab_file, in_memory=False, log=True):
+    def __init__(self, input_file, vocab_file, in_memory=False, author2id=None, log=True):
         if log:
             logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
@@ -26,8 +26,14 @@ class Corpus(object):
         self.num_times = 0
         self.vocab_size = 0
         self.max_length = 0
-        self.num_authors = 0
-        self.author2id = {}
+
+        if author2id is None:
+            self.author2id = {}
+            self.num_authors = 0
+        else:
+            self.author2id = author2id
+            self.num_authors = len(author2id)
+
         self.vocab = []
         self.input_file = input_file
         self.num_docs_per_time = []

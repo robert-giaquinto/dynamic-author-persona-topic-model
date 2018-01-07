@@ -1226,7 +1226,8 @@ def main():
         else:
             logger.info("Fitting model to {} and evaluating on {} every {} EM iterations.".format(
                 args.train_file, args.test_file, args.evaluate_every))
-            test_corpus = Corpus(args.test_file, vocab_file=args.vocab_file, in_memory=args.corpus_in_memory)
+            test_corpus = Corpus(args.test_file, vocab_file=args.vocab_file,
+                author2id=corpus.author2id, in_memory=args.corpus_in_memory)
             dap.fit_predict(train_corpus=corpus, test_corpus=test_corpus,
                 out_dir=args.out_dir, model_file=args.model_file,
                 init_beta_from=args.init, evaluate_every=args.evaluate_every,
