@@ -89,7 +89,7 @@ class Dap(object):
         if train_corpus.vocab != test_corpus.vocab:
             raise ValueError("vocabularies for training and test sets must be equal")
         if train_corpus.num_authors != test_corpus.num_authors:
-            raise ValueError("Training and test sets must have the same number of authors")
+            raise ValueError("Training and test sets must have the same number of authors. Train has {}, test has {}".format(train_corpus.num_authors, test_corpus.num_authors))
 
         common_authors = [t == e for t, e in zip(train_corpus.author2id.iteritems(), test_corpus.author2id.iteritems())]
         if len(common_authors) != len(train_corpus.author2id):

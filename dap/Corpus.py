@@ -63,7 +63,6 @@ class Corpus(object):
         """
         Main processing method for reading and parsing information in the file
         """
-        self.num_authors = 0
         skipped_docs = 0
         skipped_times = 0
         doc_id = 0
