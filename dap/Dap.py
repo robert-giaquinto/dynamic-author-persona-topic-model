@@ -17,7 +17,7 @@ from dap.SufficientStatistics import SufficientStatistics
 from dap.VariationalParameters import VariationalParameters
 from dap.Utilities import safe_log, safe_log_array, pickle_it, unpickle_it, matrix2str, softmax, dirichlet_expectation
 
-SHOW_EVERY = 1000
+SHOW_EVERY = 0 # how often to show variation parameters for a document
 logger = logging.getLogger(__name__)
 np.seterr(invalid='warn')
 np.seterr(divide='warn')
@@ -207,12 +207,13 @@ class Dap(object):
         convergence = 1.0
         converged = False
         train_results = []
+        training_time = 0.0
 
         # begin EM iterations
         total_time = time.time()
         while not converged and self._it <= self.em_max_iter:
-            # e step
             em_time = time.time()
+            # e step
             if self.num_workers > 1:
                 model_lhood, words_lhood, avg_num_iter, convergence_pct = self.expectation_parallel(corpus, save_ss=True)
             else:
@@ -224,13 +225,18 @@ class Dap(object):
             kappa = self.likelihood_kappa()
             beta = self.likelihood_beta()
             alpha_penalty = self.likelihood_alpha_penalty()
-            model_lhood += alpha + beta + kappa + alpha_penalty
-            model_pwll = model_lhood / corpus.total_words
-            words_pwll = words_lhood / corpus.total_words
             em_time = time.time() - em_time
 
+            # calculate statistics for this EM iteration
+            self._it += 1
+            training_docs = 1.0 * self._it * train_corpus.num_docs
+            model_lhood += alpha + beta + kappa + alpha_penalty
+            model_pwll = model_lhood / train_corpus.total_words
+            words_pwll = words_lhood / train_corpus.total_words
+            training_time += em_time
+
             # save convergence stats
-            if self._it > 0:
+            if self._it > 1:
                 convergence = (model_lhood_old - model_lhood) / model_lhood_old
                 if self._it <= self.em_min_iter:
                     converged = False
@@ -242,19 +248,22 @@ class Dap(object):
                 else:
                     self.var_max_iter = self.var_max_iter_init
 
-            log_str = """EM Iteration {}
+            model_lhood_old = model_lhood
+
+            # report current progress
+            log_str = """EM Iteration {} ({} total documents of training)
                 model log-likelihood: {:.1f}, model per-word log-likelihood {:.2f}, words per-word log-likelihood {:.2f},
                 Pct improvement: {:.1f}%, Avg number of iterations: {:.1f}, Pct Converged: {:.1f}
                 alpha: {:.1f}, beta: {:.1f}, kappa: {:.1f}, penalty: {:.1f}
-                docs: {}, minutes: {:.1f} => {:.1f} docs/hr
+                total minutes training: {:.2f}, previous epoch minutes training: {:.2f}, epoch's docs/hr: {:.1f}.
                 """
-            logger.info(log_str.format(self._it, model_lhood, model_pwll, words_pwll,
-                                       round(100 * convergence), avg_num_iter, convergence_pct,
-                                       alpha, beta, kappa, alpha_penalty,
-                                       sum(self.num_docs_per_time),
-                                       em_time / 60.0,
-                                       60.0 * 60.0 * sum(self.num_docs_per_time) / (1.0 * em_time)))
-            train_results.append((self._it, model_lhood, model_pwll, words_pwll, convergence, avg_num_iter, convergence_pct, em_time))
+            docs_per_hour = training_docs / (em_time / 60.0 / 60.0)
+            logger.info(log_str.format(self._it, training_docs,
+                model_lhood, model_pwll, words_pwll,
+                round(100 * convergence), avg_num_iter, convergence_pct,
+                alpha, beta, kappa, alpha_penalty,
+                training_time / 60.0, em_time / 60.0, docs_per_hour))
+            train_results.append((self._it, model_lhood, model_pwll, words_pwll, convergence, avg_num_iter, convergence_pct, em_time, training_time, training_docs))
 
             # save intermediate results every "lag" iterations
             if self.lag is not None and self._it % self.lag == 0 and self._it > 0:
@@ -263,23 +272,23 @@ class Dap(object):
                     penalty, self.num_topics, self.num_personas, self._it))
                 save_model(self, filename)
 
-            model_lhood_old = model_lhood
-            self._it += 1
-            elapsed_time += em_time
-            if max_training_minutes is not None and (elapsed_time / 60.0) > max_training_minutes:
+            if max_training_minutes is not None and (training_time / 60.0) > max_training_minutes:
                 logger.info("Maxed training time has elapsed, stopping training.")
                 break
 
         total_time = time.time() - total_time
         self.trained = True
-        log_str = """Stopped after {} iterations.
+        log_str = """Stopped after {} iterations ({} total documents of training).
             Final model log-likelihood: {:.1f}, model per-word log-likelihood {:.2f}, words per-word log-likelihood {:.2f},
-            Total time: {:.2f} (minutes), Avg docs/hour: {:.2f}
+            Total minutes elapsed: {:.2f}, total minutes training: {:.2f}, Avg docs/hour: {:.2f}
             """
-        logger.info(log_str.format(self._it, model_lhood, model_pwll, words_pwll,
-            total_time / 60.0, (self._it * corpus.num_docs) / (total_time / 60.0 / 60.0)))
+        docs_per_hour = training_docs / (training_time / 60.0 / 60.0)
+        logger.info(log_str.format(self._it, training_docs,
+            model_lhood, model_pwll, words_pwll,
+            total_time / 60.0, training_time / 60.0, docs_per_hour))
         save_model(self, os.path.join(out_dir, model_file))
         self.save_em_lhoods(lhood_file, train_results)
+        self.save_em_lhoods(lhood_file.replace("likelihood", "test_likelihood"), test_results)
 
     def predict(self, test_corpus):
         """
@@ -334,13 +343,13 @@ class Dap(object):
         model_lhood, model_lhood_old = 1.0, 1.0
         convergence = 1.0
         converged = False
-        elapsed_time = 0.0
+        training_time = 0.0
 
         # begin EM iterations
         total_time = time.time()
         while not converged and self._it <= self.em_max_iter:
-            # e step
             em_time = time.time()
+            # e step
             if self.num_workers > 1:
                 model_lhood, words_lhood, avg_num_iter, convergence_pct = self.expectation_parallel(train_corpus, save_ss=True)
             else:
@@ -352,13 +361,18 @@ class Dap(object):
             kappa = self.likelihood_kappa()
             beta = self.likelihood_beta()
             alpha_penalty = self.likelihood_alpha_penalty()
+            em_time = time.time() - em_time
+
+            # calculate statistics for this EM iteration
+            self._it += 1
+            training_docs = self._it * train_corpus.num_docs
             model_lhood += alpha + beta + kappa + alpha_penalty
             model_pwll = model_lhood / train_corpus.total_words
             words_pwll = words_lhood / train_corpus.total_words
-            em_time = time.time() - em_time
+            training_time += em_time
 
             # save convergence stats
-            if self._it > 0:
+            if self._it > 1:
                 convergence = (model_lhood_old - model_lhood) / model_lhood_old
                 if self._it <= self.em_min_iter:
                     converged = False
@@ -370,19 +384,22 @@ class Dap(object):
                 else:
                     self.var_max_iter = self.var_max_iter_init
 
-            log_str = """EM Iteration {}
+            model_lhood_old = model_lhood
+
+            # report current progress
+            log_str = """EM Iteration {} ({} total documents of training)
                 model log-likelihood: {:.1f}, model per-word log-likelihood {:.2f}, words per-word log-likelihood {:.2f},
                 Pct improvement: {:.1f}%, Avg number of iterations: {:.1f}, Pct Converged: {:.1f}
                 alpha: {:.1f}, beta: {:.1f}, kappa: {:.1f}, penalty: {:.1f}
-                docs: {}, minutes: {:.1f} => {:.1f} docs/hr
+                total minutes training: {:.2f}, previous epoch minutes training: {:.2f}, epoch's docs/hr: {:.1f}.
                 """
-            logger.info(log_str.format(self._it, model_lhood, model_pwll, words_pwll,
-                                       round(100 * convergence), avg_num_iter, convergence_pct,
-                                       alpha, beta, kappa, alpha_penalty,
-                                       sum(self.num_docs_per_time),
-                                       em_time / 60.0,
-                                       60.0 * 60.0 * sum(self.num_docs_per_time) / (1.0 * em_time)))
-            train_results.append((self._it, model_lhood, model_pwll, words_pwll, convergence, avg_num_iter, convergence_pct, em_time))
+            docs_per_hour = train_corpus.num_docs / (em_time / 60.0 / 60.0)
+            logger.info(log_str.format(self._it, training_docs,
+                model_lhood, model_pwll, words_pwll,
+                round(100 * convergence), avg_num_iter, convergence_pct,
+                alpha, beta, kappa, alpha_penalty,
+                training_time / 60.0, em_time / 60.0, docs_per_hour))
+            train_results.append((self._it, model_lhood, model_pwll, words_pwll, convergence, avg_num_iter, convergence_pct, em_time, training_time, training_docs))
 
             # save intermediate results every "lag" iterations
             if self.lag is not None and self._it % self.lag == 0 and self._it > 0:
@@ -394,24 +411,22 @@ class Dap(object):
             # test set evaluation:
             if evaluate_every is not None and self._it % evaluate_every == 0:
                 test_words_lhood, test_words_pwll = self.predict(test_corpus=test_corpus)
-                test_results.append((self._it, 0.0, 0.0, words_pwll, 0.0, 0.0, 0.0, em_time))
+                test_results.append((self._it, 0.0, 0.0, test_words_pwll, 0.0, 0.0, 0.0, em_time, training_time, training_docs))
 
-            model_lhood_old = model_lhood
-            self._it += 1
-            elapsed_time += em_time
-            if max_training_minutes is not None and (elapsed_time / 60.0) > max_training_minutes:
+            if max_training_minutes is not None and (training_time / 60.0) > max_training_minutes:
                 logger.info("Maxed training time has elapsed, stopping training.")
                 break
 
         total_time = time.time() - total_time
         self.trained = True
-        log_str = """Stopped after {} iterations.
-            Final model log-likelihood: {:.1f}, model per-word log-likelihood {:.2f},
-            Final words per-word log-likelihood {:.2f},
-            Total time: {:.2f} (minutes), Avg docs/hour: {:.2f}
+        log_str = """Stopped after {} iterations ({} total documents of training).
+            Final model log-likelihood: {:.1f}, model per-word log-likelihood {:.2f}, words per-word log-likelihood {:.2f},
+            Total minutes elapsed: {:.2f}, total minutes training: {:.2f}, Avg docs/hour: {:.2f}
             """
-        logger.info(log_str.format(self._it, model_lhood, model_pwll, words_pwll,
-            total_time / 60.0, (self._it * train_corpus.num_docs) / (total_time / 60.0 / 60.0)))
+        docs_per_hour = training_docs / (training_time / 60.0 / 60.0)
+        logger.info(log_str.format(self._it, training_docs,
+            model_lhood, model_pwll, words_pwll,
+            total_time / 60.0, training_time / 60.0, docs_per_hour))
         save_model(self, os.path.join(out_dir, model_file))
         self.save_em_lhoods(lhood_file, train_results)
         self.save_em_lhoods(lhood_file.replace("likelihood", "test_likelihood"), test_results)
@@ -971,7 +986,7 @@ class Dap(object):
 
     def save_em_lhoods(self, filename, results):
         f = open(filename, "wb")
-        f.write("iteration\tmodel_lhood\tmodel_pwll\twords_pwll\tconvergence\tavg_num_iter\tconvergence_pct\tem_time\n")
+        f.write("iteration\tmodel_lhood\tmodel_pwll\twords_pwll\tconvergence\tavg_num_iter\tconvergence_pct\tem_time\ttotal_training_time\tdocs_trained\n")
         for stats in results:
             f.write('\t'.join([str(s) for s in stats]) + "\n")
         f.close()
