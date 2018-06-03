@@ -110,7 +110,7 @@ class Corpus(object):
                         else:
                             # skip this doc, don't want to add new authors to a test set
                             skipped_docs += 1
-continue
+                            continue
 
                     # save author id
                     doc.author_id = self.author2id[doc.author]
