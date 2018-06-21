@@ -547,8 +547,8 @@ class Dap(object):
         while queue_size[0] > 0:
             process_result_queue()
 
-        if reallen != corpus.num_docs:
-            raise RuntimeError("input corpus size changed during training (don't use generators as input)")
+        #if reallen != corpus.num_docs:
+        #    raise RuntimeError("input corpus size changed during training (don't use generators as input)")
 
         # close out pool
         pool.terminate()
