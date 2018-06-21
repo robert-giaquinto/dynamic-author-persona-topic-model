@@ -546,8 +546,8 @@ class Dap(object):
         while queue_size[0] > 0:
             process_result_queue()
 
-        if reallen != corpus.num_docs:
-            raise RuntimeError("input corpus size changed during training (don't use generators as input)")
+        #if reallen != corpus.num_docs:
+        #    raise RuntimeError("input corpus size changed during training (don't use generators as input)")
 
         # close out pool
         pool.terminate()
@@ -1083,9 +1083,9 @@ def _doc_e_step_worker(input_queue, result_queue):
         logger.debug("processed chunk, queuing the result")
         if save_ss:
             result_queue.put([total_model_lhood, total_words_lhood, total_num_iter, total_converged, ss])
+            del ss
         else:
             result_queue.put([total_model_lhood, total_words_lhood, total_num_iter, total_converged, None])
-            del ss
 
 
 def chunker_info(num_workers, corpus_in_memory, total_docs, max_docs_per_chunk):
