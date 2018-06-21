@@ -5,7 +5,7 @@ import time
 import numpy as np
 import os
 from math import isnan, log, ceil
-from scipy.special import psi, gammaln, logsumexp
+from scipy.special import gammaln, logsumexp
 import warnings
 import cPickle as pickle
 from multiprocessing import Pool, Queue, cpu_count
@@ -15,7 +15,7 @@ import itertools
 from dap.Corpus import Corpus
 from dap.SufficientStatistics import SufficientStatistics
 from dap.VariationalParameters import VariationalParameters
-from dap.Utilities import safe_log, safe_log_array, pickle_it, unpickle_it, matrix2str, softmax, dirichlet_expectation
+from dap.Utilities import pickle_it, unpickle_it, matrix2str, softmax, dirichlet_expectation
 
 SHOW_EVERY = 0 # how often to show variation parameters for a document
 logger = logging.getLogger(__name__)
@@ -106,7 +106,6 @@ class Dap(object):
         :return:
         """
         self.regularization = (1.0 - np.tril(np.ones((self.num_personas, self.num_personas)))) * (self.penalty / self.num_personas)
-
 
         # initialize author personas
         self.omega = np.ones(self.num_personas) * (1.0 / self.num_personas)
@@ -229,10 +228,10 @@ class Dap(object):
 
             # calculate statistics for this EM iteration
             self._it += 1
-            training_docs = 1.0 * self._it * train_corpus.num_docs
+            training_docs = 1.0 * self._it * corpus.num_docs
             model_lhood += alpha + beta + kappa + alpha_penalty
-            model_pwll = model_lhood / train_corpus.total_words
-            words_pwll = words_lhood / train_corpus.total_words
+            model_pwll = model_lhood / corpus.total_words
+            words_pwll = words_lhood / corpus.total_words
             training_time += em_time
 
             # save convergence stats
@@ -288,7 +287,6 @@ class Dap(object):
             total_time / 60.0, training_time / 60.0, docs_per_hour))
         save_model(self, os.path.join(out_dir, model_file))
         self.save_em_lhoods(lhood_file, train_results)
-        self.save_em_lhoods(lhood_file.replace("likelihood", "test_likelihood"), test_results)
 
     def predict(self, test_corpus):
         """
@@ -308,7 +306,8 @@ class Dap(object):
     def fit_predict(self, train_corpus, test_corpus, out_dir, model_file=None, init_beta_from="random", num_docs_init=100, evaluate_every=None, max_training_minutes=None):
         """
         Main method for training DAP model
-        :param corpus:
+        :param train_corpus:
+        :param test_corpus:
         :param init_beta_from:
         :param out_dir:
         :param model_file:
@@ -472,6 +471,7 @@ class Dap(object):
         """
 
         :param corpus:
+        :param save_ss: boolean, should we save the sufficient statistics or this purely a prediction task?
         :return: lhood, avg number of iterations and convergence percentage
         """
         avg_num_iter = 0
@@ -480,7 +480,6 @@ class Dap(object):
         words_lhood = 0.0
 
         for doc in corpus:
-            t = doc.time_id
             mll, wll, num_iter, converged, _ = self.doc_e_step(doc, save_ss=save_ss)
             model_lhood += mll
             words_lhood += wll
@@ -566,6 +565,7 @@ class Dap(object):
         """
         do a e step update to variational parameters for just one document
         :param doc:
+        :param save_ss: boolean, should we save the sufficient statistics or this purely a prediction task?
         :return: lhood, number of iterations run, if it converged
         """
         # create variational parameters for this document
@@ -587,8 +587,10 @@ class Dap(object):
         num_iter = 0
         convergence = 0.0
         converged = 0
+        model_lhoods = [0.0]
+        model_lhood = 0.0
+        words_lhood = 0.0
         lhood, lhood_old = lhood_init, lhood_init
-        doc_lhoods = []
         while num_iter == 0 or (convergence > self.var_convergence and num_iter < self.var_max_iter):
             num_iter += 1
 
@@ -679,12 +681,6 @@ class Dap(object):
         calculate the total likelihood associated with kappa parameter
         :return:
         """
-        # delta = self.ss.kappa + self.omega
-        # E_log_kappa = psi(delta) - psi(delta.sum(axis=1, keepdims=True))
-        # rval = np.sum((self.omega - delta) * E_log_kappa)
-        # rval += np.sum(gammaln(delta) - gammaln(delta.sum(axis=1, keepdims=True)))
-        # rval += self.num_authors * (gammaln(self.omega.sum()) - gammaln(self.omega).sum())
-
         rval = self.num_authors * (gammaln(self.omega.sum()) - gammaln(self.omega).sum())
         # note: cancellation of omega between model and entropy term
         rval += np.sum((self._delta - 1.0) * self.E_log_kappa)
@@ -692,18 +688,11 @@ class Dap(object):
         rval += np.sum(gammaln(self._delta) - gammaln(self._delta.sum(axis=1, keepdims=True)))
         return rval
 
-        return rval
-
     def likelihood_beta(self):
         """
         calculate the total likelihood associated with beta parameter
         :return:
         """
-        # E_log_beta = psi(self._lambda) - psi(self._lambda.sum(axis=1, keepdims=True))
-        # rval = np.sum((self.eta - self._lambda) * E_log_beta)
-        # rval += np.sum(gammaln(self._lambda) - gammaln(self.eta))
-        # rval += np.sum(gammaln(self.vocab_size * self.eta) - gammaln(np.sum(self._lambda, axis=1)))
-
         rval = self.num_topics * (gammaln(np.sum(self.eta)) - np.sum(gammaln(self.eta)))
         rval += np.sum(np.sum(gammaln(self._lambda), axis=1) - gammaln(np.sum(self._lambda, axis=1)))
         return rval
@@ -796,8 +785,6 @@ class Dap(object):
                 alpha_hat = 1.0 * b / denom[np.newaxis, :]
 
             self.alpha_hat[t, :, :] = alpha_hat
-
-        # logger.info('alpha_hat[p=0]\n' + matrix2str(self.alpha_hat[:, :, 0], 3))
 
     def maximization(self):
         self.estimate_alpha()
@@ -1066,6 +1053,7 @@ def _doc_e_step_worker(input_queue, result_queue):
             num_iter = 0
             convergence = 0.0
             model_lhood, model_lhood_old = lhood_init, lhood_init
+            words_lhood = 0.0
             while num_iter == 0 or (convergence > dap.var_convergence and num_iter < dap.var_max_iter):
                 num_iter += 1
                 vp.update(doc, alpha, E_log_kappa, sigma, sigma_inv, dap.log_beta)
