@@ -1,5 +1,6 @@
 # Dynamic Author-Persona Topic Model (DAP) #
 
+<img src="../master/docs/images/dapper.png" width="100">
 
 ## Introduction ##
 See /docs/dap_2018_arxiv.pdf for technical information on the dynamic author-persona topic model (DAP).
@@ -55,7 +56,10 @@ See /docs/dap_2018_arxiv.pdf for technical information on the dynamic author-per
 
 5. Preparing data for the model
 
-   TODO: build tutorial for easily accessible dataset
+   See [Signal Media 1M](http://research.signalmedia.co/newsir16/signal-dataset.html) to download the Signal Media dataset.
+
+   See `/src/preprocessing/preprocess_signalmedia.py` for tools to prepare the Signal Media data. Or use the already preprocessed data included in this repository.
+
 
 6. Running the model
 
